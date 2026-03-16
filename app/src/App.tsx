@@ -301,10 +301,11 @@ export default function App() {
 	);
 
 	useEffect(() => {
+		const base = import.meta.env.BASE_URL;
 		Promise.all([
-			fetch('/properties.json').then((r) => r.json()),
-			fetch('/districts.geojson').then((r) => r.json()),
-			fetch('/boundary.geojson').then((r) => r.json()),
+			fetch(`${base}properties.json`).then((r) => r.json()),
+			fetch(`${base}districts.geojson`).then((r) => r.json()),
+			fetch(`${base}boundary.geojson`).then((r) => r.json()),
 		]).then(([props, dists, bound]) => {
 			setProperties(props);
 			setDistricts(dists);
