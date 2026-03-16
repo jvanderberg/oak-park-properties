@@ -333,11 +333,13 @@ export default function App() {
 	}, [properties]);
 
 	// Default to all classes selected once loaded
+	const didInit = useRef(false);
 	useEffect(() => {
-		if (classInfos.length > 0 && selectedClasses.size === 0) {
+		if (!didInit.current && classInfos.length > 0) {
+			didInit.current = true;
 			setSelectedClasses(new Set(classInfos.map((c) => c.class)));
 		}
-	}, [classInfos, selectedClasses.size]);
+	}, [classInfos]);
 
 	const filtered = useMemo(() => {
 		return properties.filter((p) => selectedClasses.has(p.class));
