@@ -304,6 +304,7 @@ export default function App() {
 	const [selectedClasses, setSelectedClasses] = useState<Set<string>>(
 		new Set(),
 	);
+	const [districtFilter, setDistrictFilter] = useState<string | null>(null);
 
 	useEffect(() => {
 		const base = import.meta.env.BASE_URL;
@@ -350,10 +351,15 @@ export default function App() {
 		return properties.filter((p) => selectedClasses.has(p.class));
 	}, [properties, selectedClasses]);
 
+	const displayed = useMemo(() => {
+		if (!districtFilter) return filtered;
+		return filtered.filter((p) => p.district === districtFilter);
+	}, [filtered, districtFilter]);
+
 	const districtTotals = useMemo(() => {
 		const counts: Record<string, number> = {};
 		let noDistrict = 0;
-		for (const p of filtered) {
+		for (const p of displayed) {
 			if (p.district) {
 				counts[p.district] = (counts[p.district] || 0) + 1;
 			} else {
@@ -361,7 +367,7 @@ export default function App() {
 			}
 		}
 		return { counts, noDistrict };
-	}, [filtered]);
+	}, [displayed]);
 
 	function toggleClass(cls: string) {
 		setSelectedClasses((prev) => {
@@ -373,14 +379,17 @@ export default function App() {
 	}
 
 	function selectAll() {
+		setDistrictFilter(null);
 		setSelectedClasses(new Set(classInfos.map((c) => c.class)));
 	}
 
 	function selectNone() {
+		setDistrictFilter(null);
 		setSelectedClasses(new Set());
 	}
 
 	function selectByPrefix(prefix: string) {
+		setDistrictFilter(null);
 		setSelectedClasses(
 			new Set(
 				classInfos
@@ -388,6 +397,45 @@ export default function App() {
 					.map((c) => c.class),
 			),
 		);
+	}
+
+	function selectByDistrict(district: string) {
+		setDistrictFilter(district);
+		setSelectedClasses(new Set(classInfos.map((c) => c.class)));
+	}
+
+	function downloadCsv() {
+		const rows = displayed;
+		if (rows.length === 0) return;
+		const headers = [
+			'pin',
+			'address',
+			'class',
+			'description',
+			'district',
+			'lat',
+			'lon',
+		];
+		const csv = [
+			headers.join(','),
+			...rows.map((p) =>
+				headers
+					.map((h) => {
+						const val = String(p[h as keyof Property] ?? '');
+						return val.includes(',') || val.includes('"')
+							? `"${val.replace(/"/g, '""')}"`
+							: val;
+					})
+					.join(','),
+			),
+		].join('\n');
+		const blob = new Blob([csv], { type: 'text/csv' });
+		const url = URL.createObjectURL(blob);
+		const a = document.createElement('a');
+		a.href = url;
+		a.download = 'oak-park-properties.csv';
+		a.click();
+		URL.revokeObjectURL(url);
 	}
 
 	return (
@@ -439,7 +487,7 @@ export default function App() {
 					<span className="text-sm font-medium">Property Class</span>
 					<div className="flex items-center gap-2">
 						<Badge variant="secondary">
-							{filtered.length.toLocaleString()} /{' '}
+							{displayed.length.toLocaleString()} /{' '}
 							{properties.length.toLocaleString()}
 						</Badge>
 						<div className="flex gap-2 text-xs">
@@ -464,20 +512,33 @@ export default function App() {
 					className="text-xs px-2 py-1 rounded border border-border bg-background"
 					defaultValue=""
 					onChange={(e) => {
-						if (e.target.value) {
-							selectByPrefix(e.target.value);
-							e.target.value = '';
+						if (!e.target.value) return;
+						const val = e.target.value;
+						if (val.startsWith('district:')) {
+							selectByDistrict(val.slice('district:'.length));
+						} else {
+							selectByPrefix(val);
 						}
+						e.target.value = '';
 					}}
 				>
 					<option value="" disabled>
-						Select major class...
+						Quick filter...
 					</option>
-					{MAJOR_CLASS_GROUPS.map((g) => (
-						<option key={g.prefix} value={g.prefix}>
-							{g.label} — {g.description}
-						</option>
-					))}
+					<optgroup label="Major Class">
+						{MAJOR_CLASS_GROUPS.map((g) => (
+							<option key={g.prefix} value={g.prefix}>
+								{g.label} — {g.description}
+							</option>
+						))}
+					</optgroup>
+					<optgroup label="Historic District">
+						{Object.keys(DISTRICT_COLORS).map((name) => (
+							<option key={name} value={`district:${name}`}>
+								{name}
+							</option>
+						))}
+					</optgroup>
 				</select>
 				<div className="flex flex-col gap-1.5 overflow-y-auto">
 					{classInfos.map((c) => (
@@ -509,6 +570,13 @@ export default function App() {
 						</div>
 					))}
 				</div>
+				<button
+					type="button"
+					onClick={downloadCsv}
+					className="text-xs px-3 py-1.5 rounded border border-border hover:bg-accent hover:text-accent-foreground"
+				>
+					Download CSV ({displayed.length.toLocaleString()})
+				</button>
 			</div>
 
 			{/* Map */}
@@ -521,8 +589,8 @@ export default function App() {
 							{Object.entries(DISTRICT_COLORS).map(([name, color]) => {
 								const count = districtTotals.counts[name] || 0;
 								const pct =
-									filtered.length > 0
-										? ((count / filtered.length) * 100).toFixed(1)
+									displayed.length > 0
+										? ((count / displayed.length) * 100).toFixed(1)
 										: '0.0';
 								return (
 									<tr key={name}>
@@ -554,13 +622,13 @@ export default function App() {
 									0,
 								);
 								const inPct =
-									filtered.length > 0
-										? ((inDistrict / filtered.length) * 100).toFixed(1)
+									displayed.length > 0
+										? ((inDistrict / displayed.length) * 100).toFixed(1)
 										: '0.0';
 								const noPct =
-									filtered.length > 0
+									displayed.length > 0
 										? (
-												(districtTotals.noDistrict / filtered.length) *
+												(districtTotals.noDistrict / displayed.length) *
 												100
 											).toFixed(1)
 										: '0.0';
@@ -590,7 +658,7 @@ export default function App() {
 							<tr className="font-medium border-t border-border">
 								<td className="pt-1">Total</td>
 								<td className="font-mono tabular-nums text-right pt-1">
-									{filtered.length.toLocaleString()}
+									{displayed.length.toLocaleString()}
 								</td>
 								<td />
 							</tr>
@@ -610,7 +678,7 @@ export default function App() {
 					/>
 					<MapBounds properties={properties} />
 					{boundary && <BoundaryLayer boundary={boundary} />}
-					<PropertyMarkers properties={filtered} />
+					<PropertyMarkers properties={displayed} />
 
 					{districts && (
 						<DistrictLayers districts={districts} enabled={enabledDistricts} />
