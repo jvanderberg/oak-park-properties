@@ -140,8 +140,12 @@ function PropertyMarkers({ properties }: { properties: Property[] }) {
 	const rendererRef = useRef<L.Canvas | null>(null);
 
 	useEffect(() => {
+		if (!map.getPane('markers')) {
+			const pane = map.createPane('markers');
+			pane.style.zIndex = '460';
+		}
 		if (!rendererRef.current) {
-			rendererRef.current = L.canvas({ padding: 0.5 });
+			rendererRef.current = L.canvas({ padding: 0.5, pane: 'markers' });
 		}
 		if (!layerRef.current) {
 			layerRef.current = L.layerGroup().addTo(map);
@@ -160,6 +164,7 @@ function PropertyMarkers({ properties }: { properties: Property[] }) {
 				fillOpacity: 0.7,
 				weight: 1,
 				renderer,
+				pane: 'markers',
 			})
 				.bindPopup(() => {
 					const div = document.createElement('div');
