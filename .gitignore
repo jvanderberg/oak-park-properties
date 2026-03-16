@@ -1,0 +1,7 @@
+node_modules/
+dist/
+data/
+app/public/class_summary.json
+op_properties.csv
+*.log
+.DS_Store
