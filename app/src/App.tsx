@@ -415,6 +415,7 @@ export default function App() {
 			'district',
 			'lat',
 			'lon',
+			'url',
 		];
 		const csv = [
 			headers.join(','),
