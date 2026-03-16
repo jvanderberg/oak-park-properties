@@ -6,6 +6,7 @@ export interface Property {
 	class: string;
 	description: string;
 	district: string | null;
+	url: string;
 }
 
 export interface ClassInfo {

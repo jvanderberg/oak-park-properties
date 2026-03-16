@@ -222,6 +222,7 @@ async function main() {
         class: row.class,
         description: classDescs[row.class] || '',
         district: district || null,
+        url: `https://www.cookcountyassessor.com/pin/${row.pin}`,
       });
     }
   }

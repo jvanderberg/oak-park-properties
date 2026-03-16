@@ -171,7 +171,7 @@ function PropertyMarkers({ properties }: { properties: Property[] }) {
 					div.style.fontSize = '12px';
 					div.innerHTML = [
 						`<strong>${p.address || 'No address'}</strong>`,
-						`PIN: <a href="https://www.cookcountyassessor.com/pin/${p.pin}" target="_blank" rel="noopener noreferrer" style="color:#2563eb;text-decoration:underline">${p.pin}</a>`,
+						`PIN: <a href="${p.url}" target="_blank" rel="noopener noreferrer" style="color:#2563eb;text-decoration:underline">${p.pin}</a>`,
 						`Class: ${p.class} — ${p.description}`,
 						p.district ? `District: ${p.district}` : '',
 					]
