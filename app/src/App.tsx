@@ -553,7 +553,7 @@ export default function App() {
 								setHighlightedProperty(null);
 								setSearchOpen(false);
 							}}
-							className="absolute right-1.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground text-sm leading-none"
+							className="absolute right-0 top-0 bottom-0 w-7 flex items-center justify-center text-muted-foreground hover:text-foreground text-sm"
 						>
 							&times;
 						</button>
