@@ -206,6 +206,12 @@ function HighlightMarker({ property }: { property: Property | null }) {
 		}
 		if (!property) return;
 
+		if (!map.getPane('highlight')) {
+			const pane = map.createPane('highlight');
+			pane.style.zIndex = '470';
+			pane.style.pointerEvents = 'none';
+		}
+
 		const latlng: [number, number] = [property.lat, property.lon];
 		const maxZoom = map.getMaxZoom() || 18;
 		map.setView(latlng, maxZoom - 1);
@@ -216,15 +222,8 @@ function HighlightMarker({ property }: { property: Property | null }) {
 			weight: 2,
 			fillOpacity: 0,
 			interactive: false,
-			pane: 'markers',
+			pane: 'highlight',
 		}).addTo(map);
-
-		const popup = `<div style="font-size:12px">
-			<strong>${property.address || 'No address'}</strong><br>
-			PIN: <a href="${property.url}" target="_blank" rel="noopener noreferrer" style="color:#2563eb;text-decoration:underline">${property.pin}</a><br>
-			Class: ${property.class} — ${property.description}
-			${property.district ? `<br>District: ${property.district}` : ''}
-		</div>`;
 
 		markerRef.current = L.circleMarker(latlng, {
 			radius: 5,
@@ -232,10 +231,9 @@ function HighlightMarker({ property }: { property: Property | null }) {
 			fillColor: '#ef4444',
 			fillOpacity: 1,
 			weight: 2,
-			pane: 'markers',
-		})
-			.bindPopup(popup)
-			.addTo(map);
+			interactive: false,
+			pane: 'highlight',
+		}).addTo(map);
 
 		return () => {
 			if (markerRef.current) map.removeLayer(markerRef.current);
