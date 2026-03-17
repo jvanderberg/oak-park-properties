@@ -22,6 +22,7 @@ const SOCRATA_BASE = 'https://datacatalog.cookcountyil.gov/resource';
 
 const DATASETS = {
   values: 'uzyt-m557',
+  chars: 'x54s-btds',
   addresses: '3723-97qp',
   geopoints: '78yw-iddh',
 };
@@ -141,6 +142,26 @@ function createSchema(db) {
     );
     CREATE INDEX IF NOT EXISTS idx_ap_city ON address_points(city);
 
+    CREATE TABLE IF NOT EXISTS property_characteristics (
+      pin            TEXT NOT NULL,
+      year           INTEGER NOT NULL,
+      char_yrblt     INTEGER,
+      char_bldg_sf   INTEGER,
+      char_land_sf   INTEGER,
+      char_beds      INTEGER,
+      char_rooms     INTEGER,
+      char_fbath     INTEGER,
+      char_hbath     INTEGER,
+      char_type_resd TEXT,
+      char_cnst_qlty TEXT,
+      char_ext_wall  TEXT,
+      char_bsmt      TEXT,
+      char_heat      TEXT,
+      char_air       TEXT,
+      char_use       TEXT,
+      PRIMARY KEY (pin, year)
+    );
+
     CREATE TABLE IF NOT EXISTS property_classes (
       class            TEXT PRIMARY KEY,
       major_class      TEXT NOT NULL,
@@ -193,6 +214,27 @@ function transformAddressPoint(raw) {
     township: toText(raw.twp_name),
     lat: toReal(raw.lat),
     lon: toReal(raw.long),
+  };
+}
+
+function transformCharacteristic(raw) {
+  return {
+    pin: toText(raw.pin),
+    year: toInt(raw.year),
+    char_yrblt: toInt(raw.char_yrblt),
+    char_bldg_sf: toInt(raw.char_bldg_sf),
+    char_land_sf: toInt(raw.char_land_sf),
+    char_beds: toInt(raw.char_beds),
+    char_rooms: toInt(raw.char_rooms),
+    char_fbath: toInt(raw.char_fbath),
+    char_hbath: toInt(raw.char_hbath),
+    char_type_resd: toText(raw.char_type_resd),
+    char_cnst_qlty: toText(raw.char_cnst_qlty),
+    char_ext_wall: toText(raw.char_ext_wall),
+    char_bsmt: toText(raw.char_bsmt),
+    char_heat: toText(raw.char_heat),
+    char_air: toText(raw.char_air),
+    char_use: toText(raw.char_use),
   };
 }
 
@@ -298,6 +340,34 @@ async function ingestAddressPoints(db) {
     total += rows.length;
     console.log(`  ${total.toLocaleString()} rows`);
   }
+  return total;
+}
+
+async function ingestCharacteristics(db, year) {
+  console.log(`\nIngesting property_characteristics (Oak Park, year=${year})...`);
+  const inserter = createBatchInserter(db, 'property_characteristics');
+  let total = 0;
+
+  // Fetch by PIN prefix ranges that cover Oak Park (16xxx)
+  const pins = new Set(
+    db.prepare('SELECT pin FROM assessed_values WHERE year = ?').all(year).map(r => r.pin)
+  );
+  const prefixes = [...new Set([...pins].map(p => p.substring(0, 5)))];
+  console.log(`  Fetching ${prefixes.length} PIN prefixes...`);
+
+  for (const prefix of prefixes) {
+    const where = `year='${year}' AND starts_with(pin, '${prefix}')`;
+    for await (const batch of fetchSocrata(DATASETS.chars, where)) {
+      const rows = batch
+        .map(transformCharacteristic)
+        .filter(r => pins.has(r.pin));
+      if (rows.length > 0) {
+        inserter.insert(rows);
+        total += rows.length;
+      }
+    }
+  }
+  console.log(`  ${total.toLocaleString()} rows`);
   return total;
 }
 
@@ -435,16 +505,18 @@ async function main() {
   const avCount = await ingestAssessedValues(db, opts.year);
   const apCount = await ingestAddressPoints(db);
   const paCount = await ingestParcelAddresses(db, opts.year);
+  const chCount = await ingestCharacteristics(db, opts.year);
   seedPropertyClasses(db);
 
   db.close();
 
   const elapsed = ((Date.now() - start) / 1000).toFixed(1);
   console.log(`\nDone in ${elapsed}s:`);
-  console.log(`  assessed_values:  ${avCount.toLocaleString()}`);
-  console.log(`  address_points:   ${apCount.toLocaleString()}`);
-  console.log(`  parcel_addresses: ${paCount.toLocaleString()}`);
-  console.log(`  property_classes: ${PROPERTY_CLASSES.length}`);
+  console.log(`  assessed_values:       ${avCount.toLocaleString()}`);
+  console.log(`  address_points:        ${apCount.toLocaleString()}`);
+  console.log(`  parcel_addresses:      ${paCount.toLocaleString()}`);
+  console.log(`  property_characteristics: ${chCount.toLocaleString()}`);
+  console.log(`  property_classes:      ${PROPERTY_CLASSES.length}`);
   console.log(`\nDatabase: ${path.resolve(opts.db)}`);
 }
 
