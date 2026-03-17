@@ -36,6 +36,7 @@ export default function App() {
 	const [properties, setProperties] = useState<Property[]>([]);
 	const [districts, setDistricts] = useState<FeatureCollection | null>(null);
 	const [boundary, setBoundary] = useState<FeatureCollection | null>(null);
+	const [parcels, setParcels] = useState<FeatureCollection | null>(null);
 
 	useEffect(() => {
 		const base = import.meta.env.BASE_URL;
@@ -43,10 +44,12 @@ export default function App() {
 			fetch(`${base}properties.json`).then((r) => r.json()),
 			fetch(`${base}districts.geojson`).then((r) => r.json()),
 			fetch(`${base}boundary.geojson`).then((r) => r.json()),
-		]).then(([props, dists, bound]) => {
+			fetch(`${base}parcels.geojson`).then((r) => r.json()),
+		]).then(([props, dists, bound, parcs]) => {
 			setProperties(props);
 			setDistricts(dists);
 			setBoundary(bound);
+			setParcels(parcs);
 		});
 	}, []);
 
@@ -347,7 +350,7 @@ export default function App() {
 					/>
 					<MapBounds properties={properties} />
 					{boundary && <BoundaryLayer boundary={boundary} />}
-					<PropertyMarkers properties={displayed} />
+					<PropertyMarkers properties={displayed} parcels={parcels} />
 					{districts && (
 						<DistrictLayers districts={districts} enabled={enabledDistricts} />
 					)}

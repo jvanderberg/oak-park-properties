@@ -95,7 +95,7 @@ export function DistrictLayers({
 			if (!name || !enabled.has(name)) continue;
 			const color = DISTRICT_COLORS[name] || '#888';
 			L.geoJSON(feature, {
-				style: { color, weight: 4, fillOpacity: 0.1 },
+				style: { color, weight: 6, fillOpacity: 0.1 },
 				pane: 'districts',
 				onEachFeature: (_f, layer) => {
 					layer.bindTooltip(name);
@@ -112,16 +112,58 @@ export function DistrictLayers({
 }
 
 // ── PropertyMarkers ──────────────────────────────────────────────────
-// Renders ~17k property markers using Leaflet's Canvas renderer for performance.
-// Each marker gets a popup with address, PIN (linked to assessor site), class, and district.
+// Renders property parcels as filled polygons where geometry is available,
+// falling back to circle markers for properties without parcel shapes.
+// Parcels GeoJSON features have properties: { name (PIN), pin, class, ... }
 
-export function PropertyMarkers({ properties }: { properties: Property[] }) {
+function buildPopup(p: Property): HTMLElement {
+	const div = document.createElement('div');
+	div.style.fontSize = '12px';
+	div.innerHTML = [
+		`<strong>${p.address || 'No address'}</strong>`,
+		`PIN: <a href="${p.url}" target="_blank" rel="noopener noreferrer" style="color:#2563eb;text-decoration:underline">${p.pin}</a>`,
+		`Class: ${p.class} — ${p.description}`,
+		p.district ? `District: ${p.district}` : '',
+	]
+		.filter(Boolean)
+		.join('<br>');
+	return div;
+}
+
+// Build a popup listing multiple units sharing a parcel
+function buildMultiPopup(units: Property[]): HTMLElement {
+	const div = document.createElement('div');
+	div.style.fontSize = '12px';
+	div.style.maxHeight = '200px';
+	div.style.overflowY = 'auto';
+	const first = units[0];
+	const lines = [
+		`<strong>${first.address || 'No address'}</strong>`,
+		`${units.length} units at this parcel:`,
+		'<hr style="margin:4px 0">',
+	];
+	for (const p of units) {
+		lines.push(
+			`<a href="${p.url}" target="_blank" rel="noopener noreferrer" style="color:#2563eb;text-decoration:underline">${p.pin}</a> — ${p.class} ${p.description}`,
+		);
+	}
+	if (first.district) lines.push(`<br>District: ${first.district}`);
+	div.innerHTML = lines.join('<br>');
+	return div;
+}
+
+export function PropertyMarkers({
+	properties,
+	parcels,
+}: {
+	properties: Property[];
+	parcels: FeatureCollection | null;
+}) {
 	const map = useMap();
 	const layerRef = useRef<L.LayerGroup | null>(null);
 	const rendererRef = useRef<L.Canvas | null>(null);
 
 	useEffect(() => {
-		// Create a pane above districts so markers are clickable
 		if (!map.getPane('markers')) {
 			const pane = map.createPane('markers');
 			pane.style.zIndex = '460';
@@ -137,7 +179,65 @@ export function PropertyMarkers({ properties }: { properties: Property[] }) {
 		const renderer = rendererRef.current;
 		layer.clearLayers();
 
+		const displayedPins = new Set(properties.map((p) => p.pin));
+		const propsByPin = new Map(properties.map((p) => [p.pin, p]));
+
+		// Group parcel features by geometry identity (condo units share a parent shape).
+		// Use first coordinate as a cheap fingerprint to deduplicate.
+		const renderedPins = new Set<string>();
+		if (parcels) {
+			const geomGroups = new Map<
+				string,
+				{ coords: [number, number][][]; pins: string[] }
+			>();
+			for (const feature of parcels.features) {
+				const pin = feature.properties?.pin ?? feature.properties?.name;
+				if (!pin || !displayedPins.has(pin)) continue;
+
+				const geom = feature.geometry as { coordinates: number[][][] } | null;
+				if (!geom?.coordinates) continue;
+
+				const fp = JSON.stringify(geom.coordinates[0]?.[0]);
+				const existing = geomGroups.get(fp);
+				if (existing) {
+					existing.pins.push(pin);
+				} else {
+					// Convert GeoJSON [lon,lat] to Leaflet [lat,lon]
+					const rings = geom.coordinates.map((ring) =>
+						ring.map(([lon, lat]) => [lat, lon] as [number, number]),
+					);
+					geomGroups.set(fp, { coords: rings, pins: [pin] });
+				}
+			}
+
+			// Render one L.polygon per unique parcel shape on the shared canvas
+			for (const { coords, pins } of geomGroups.values()) {
+				const units = pins
+					.map((pin) => propsByPin.get(pin))
+					.filter((p): p is Property => p !== undefined);
+				if (units.length === 0) continue;
+
+				const color = classColor(units[0].class);
+				L.polygon(coords, {
+					color,
+					fillColor: color,
+					fillOpacity: 0.35,
+					weight: 1,
+					renderer,
+					pane: 'markers',
+				})
+					.bindPopup(() =>
+						units.length === 1 ? buildPopup(units[0]) : buildMultiPopup(units),
+					)
+					.addTo(layer);
+
+				for (const pin of pins) renderedPins.add(pin);
+			}
+		}
+
+		// Fall back to circle markers for properties without parcel geometry
 		for (const p of properties) {
+			if (renderedPins.has(p.pin)) continue;
 			const color = classColor(p.class);
 			L.circleMarker([p.lat, p.lon], {
 				radius: 3,
@@ -148,26 +248,14 @@ export function PropertyMarkers({ properties }: { properties: Property[] }) {
 				renderer,
 				pane: 'markers',
 			})
-				.bindPopup(() => {
-					const div = document.createElement('div');
-					div.style.fontSize = '12px';
-					div.innerHTML = [
-						`<strong>${p.address || 'No address'}</strong>`,
-						`PIN: <a href="${p.url}" target="_blank" rel="noopener noreferrer" style="color:#2563eb;text-decoration:underline">${p.pin}</a>`,
-						`Class: ${p.class} — ${p.description}`,
-						p.district ? `District: ${p.district}` : '',
-					]
-						.filter(Boolean)
-						.join('<br>');
-					return div;
-				})
+				.bindPopup(() => buildPopup(p))
 				.addTo(layer);
 		}
 
 		return () => {
 			layer.clearLayers();
 		};
-	}, [properties, map]);
+	}, [properties, parcels, map]);
 
 	return null;
 }

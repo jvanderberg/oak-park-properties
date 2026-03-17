@@ -25,6 +25,9 @@ const booleanPointInPolygon = require('@turf/boolean-point-in-polygon').default;
 const { point } = require('@turf/helpers');
 const turfUnion = require('@turf/union').default;
 
+const ARCGIS_PARCELS_URL =
+  'https://gis.cookcountyil.gov/hosting/rest/services/Hosted/Parcel_2022/FeatureServer/0/query';
+
 const ARCGIS_HISTORIC_DISTRICTS_URL =
   'https://utility.arcgis.com/usrsvcs/servers/4cff1aaefa364b57b8c70d5c606f2088/rest/services/VOP/AGOL_VOP_Project/MapServer/13/query';
 
@@ -157,6 +160,47 @@ function classifyDistrict(lon, lat, features) {
   return '';
 }
 
+// ─── Parcel geometries ──────────────────────────────────────────────
+
+const PARCEL_BATCH_SIZE = 500;
+
+async function fetchParcelGeometries(pins) {
+  console.log(`\nFetching parcel geometries for ${pins.length} PINs...`);
+  const features = [];
+  const missing = [];
+
+  for (let i = 0; i < pins.length; i += PARCEL_BATCH_SIZE) {
+    const batch = pins.slice(i, i + PARCEL_BATCH_SIZE);
+    const where = `name IN (${batch.map(p => `'${p}'`).join(',')})`;
+    const body = new URLSearchParams({
+      where,
+      outFields: 'name',
+      outSR: '4326',
+      f: 'geojson',
+    });
+
+    const resp = await fetch(ARCGIS_PARCELS_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: body.toString(),
+    });
+    if (!resp.ok) throw new Error(`Parcel fetch failed: ${resp.status}`);
+    const geojson = await resp.json();
+    features.push(...geojson.features);
+
+    const found = new Set(geojson.features.map(f => f.properties.name));
+    for (const pin of batch) {
+      if (!found.has(pin)) missing.push(pin);
+    }
+
+    const pct = Math.min(100, Math.round(((i + batch.length) / pins.length) * 100));
+    process.stdout.write(`\r  ${features.length} parcels fetched (${pct}%)`);
+  }
+  console.log(`\n  Got ${features.length} parcel geometries, ${missing.length} missing`);
+
+  return { type: 'FeatureCollection', features };
+}
+
 // ─── Main ────────────────────────────────────────────────────────────
 
 async function main() {
@@ -229,6 +273,49 @@ async function main() {
 
   db.close();
 
+  // Fetch parcel geometries from ArcGIS
+  const allPins = properties.map(p => p.pin);
+  const parcelsGeojson = await fetchParcelGeometries(allPins);
+
+  // Try parent PINs (base 10 digits + 0000) for missing condos/units
+  const foundPins = new Set(parcelsGeojson.features.map(f => f.properties.name));
+  const missingPins = allPins.filter(p => !foundPins.has(p));
+  const parentPinMap = {}; // parentPin -> [childPins]
+  for (const pin of missingPins) {
+    const parent = pin.substring(0, 10) + '0000';
+    if (parent !== pin && !foundPins.has(parent)) {
+      if (!parentPinMap[parent]) parentPinMap[parent] = [];
+      parentPinMap[parent].push(pin);
+    }
+  }
+  const uniqueParents = Object.keys(parentPinMap);
+  if (uniqueParents.length > 0) {
+    console.log(`\nFetching ${uniqueParents.length} parent parcel geometries for ${missingPins.length} condo/unit PINs...`);
+    const parentParcels = await fetchParcelGeometries(uniqueParents);
+    // Add parent geometries as entries for each child PIN
+    for (const f of parentParcels.features) {
+      const parentPin = f.properties.name;
+      const children = parentPinMap[parentPin] || [];
+      for (const childPin of children) {
+        parcelsGeojson.features.push({
+          ...f,
+          properties: { ...f.properties, name: childPin },
+        });
+      }
+    }
+    console.log(`  Total parcels after parent fallback: ${parcelsGeojson.features.length}`);
+  }
+
+  // Attach property data to parcel features for map rendering
+  const propsByPin = {};
+  for (const p of properties) propsByPin[p.pin] = p;
+  for (const f of parcelsGeojson.features) {
+    const p = propsByPin[f.properties.name];
+    if (p) {
+      f.properties = { ...f.properties, pin: p.pin, class: p.class, description: p.description, district: p.district, address: p.address, url: p.url };
+    }
+  }
+
   // Write JSON files
   fs.mkdirSync(opts.outputDir, { recursive: true });
 
@@ -240,6 +327,9 @@ async function main() {
 
   const boundaryPath = path.join(opts.outputDir, 'boundary.geojson');
   fs.writeFileSync(boundaryPath, JSON.stringify(boundaryGeojson));
+
+  const parcelsPath = path.join(opts.outputDir, 'parcels.geojson');
+  fs.writeFileSync(parcelsPath, JSON.stringify(parcelsGeojson));
 
   // Summary
   console.log(`\nCoordinate resolution:`);
@@ -259,6 +349,7 @@ async function main() {
   console.log(`\nWrote ${properties.length} properties to ${path.resolve(propsPath)}`);
   console.log(`Wrote district boundaries to ${path.resolve(districtsPath)}`);
   console.log(`Wrote village boundary to ${path.resolve(boundaryPath)}`);
+  console.log(`Wrote ${parcelsGeojson.features.length} parcel geometries to ${path.resolve(parcelsPath)}`);
 }
 
 main().catch(e => {

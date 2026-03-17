@@ -88,6 +88,18 @@ export function InfoButton() {
 						</li>
 					</ul>
 					<p>
+						Parcel boundaries from the{' '}
+						<a
+							href="https://gis.cookcountyil.gov/hosting/rest/services/Hosted/Parcel_2022/FeatureServer/0"
+							target="_blank"
+							rel="noreferrer"
+							className="underline text-primary"
+						>
+							Cook County GIS Parcel Layer
+						</a>
+						.
+					</p>
+					<p>
 						Historic district boundaries from the{' '}
 						<a
 							href="https://oak-park-open-data-portal-v2-oakparkil.hub.arcgis.com/datasets/d3ff666dfb764e8183879667acce810e_13/explore"

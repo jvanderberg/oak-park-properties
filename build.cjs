@@ -34,4 +34,4 @@ for (const step of steps) {
 
 const elapsed = ((Date.now() - start) / 1000).toFixed(1);
 console.log(`Build complete in ${elapsed}s`);
-console.log('Run the app:  cd app && npm run dev');
+console.log('Run the app:  npm run dev');
