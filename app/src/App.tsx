@@ -523,7 +523,7 @@ export default function App() {
 						}}
 						className="w-full text-xs px-2 py-1.5 rounded border border-border bg-background"
 					/>
-					{searchText.length >= 2 && searchResults.length > 1 && (
+					{searchText.length >= 2 && searchResults.length >= 1 && (
 						<div className="absolute z-50 left-0 right-0 top-full mt-1 max-h-48 overflow-y-auto rounded border border-border bg-background shadow-lg">
 							{searchResults.map((p) => (
 								<button
