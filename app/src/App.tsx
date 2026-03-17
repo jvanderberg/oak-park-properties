@@ -190,6 +190,52 @@ function PropertyMarkers({ properties }: { properties: Property[] }) {
 	return null;
 }
 
+function HighlightMarker({ property }: { property: Property | null }) {
+	const map = useMap();
+	const markerRef = useRef<L.CircleMarker | null>(null);
+	const ringRef = useRef<L.CircleMarker | null>(null);
+
+	useEffect(() => {
+		if (markerRef.current) {
+			map.removeLayer(markerRef.current);
+			markerRef.current = null;
+		}
+		if (ringRef.current) {
+			map.removeLayer(ringRef.current);
+			ringRef.current = null;
+		}
+		if (!property) return;
+
+		const latlng: [number, number] = [property.lat, property.lon];
+		const maxZoom = map.getMaxZoom() || 18;
+		map.setView(latlng, maxZoom - 1);
+
+		ringRef.current = L.circleMarker(latlng, {
+			radius: 14,
+			color: '#ef4444',
+			weight: 2,
+			fillOpacity: 0,
+			pane: 'markers',
+		}).addTo(map);
+
+		markerRef.current = L.circleMarker(latlng, {
+			radius: 5,
+			color: '#ef4444',
+			fillColor: '#ef4444',
+			fillOpacity: 1,
+			weight: 2,
+			pane: 'markers',
+		}).addTo(map);
+
+		return () => {
+			if (markerRef.current) map.removeLayer(markerRef.current);
+			if (ringRef.current) map.removeLayer(ringRef.current);
+		};
+	}, [property, map]);
+
+	return null;
+}
+
 function InfoButton() {
 	const [open, setOpen] = useState(false);
 	const btnRef = useRef<HTMLButtonElement>(null);
@@ -305,6 +351,23 @@ export default function App() {
 		new Set(),
 	);
 	const [districtFilter, setDistrictFilter] = useState<string | null>(null);
+	const [searchText, setSearchText] = useState('');
+	const [highlightedProperty, setHighlightedProperty] =
+		useState<Property | null>(null);
+
+	const searchResults = useMemo(() => {
+		if (searchText.length < 2) return [];
+		const q = searchText.toLowerCase();
+		return properties
+			.filter((p) => p.address.toLowerCase().includes(q) || p.pin.includes(q))
+			.slice(0, 20);
+	}, [properties, searchText]);
+
+	useEffect(() => {
+		if (searchResults.length === 1) {
+			setHighlightedProperty(searchResults[0]);
+		}
+	}, [searchResults]);
 
 	useEffect(() => {
 		const base = import.meta.env.BASE_URL;
@@ -446,6 +509,43 @@ export default function App() {
 				<div className="flex items-center justify-between">
 					<h1 className="text-lg font-semibold">Oak Park Properties</h1>
 					<InfoButton />
+				</div>
+
+				{/* Search */}
+				<div className="relative">
+					<input
+						type="text"
+						placeholder="Search address or PIN..."
+						value={searchText}
+						onChange={(e) => {
+							setSearchText(e.target.value);
+							if (e.target.value.length < 2) setHighlightedProperty(null);
+						}}
+						className="w-full text-xs px-2 py-1.5 rounded border border-border bg-background"
+					/>
+					{searchText.length >= 2 && searchResults.length > 1 && (
+						<div className="absolute z-50 left-0 right-0 top-full mt-1 max-h-48 overflow-y-auto rounded border border-border bg-background shadow-lg">
+							{searchResults.map((p) => (
+								<button
+									type="button"
+									key={p.pin}
+									onClick={() => {
+										setHighlightedProperty(p);
+										setSearchText(p.address || p.pin);
+									}}
+									className="w-full text-left text-xs px-2 py-1.5 hover:bg-accent hover:text-accent-foreground border-b border-border last:border-b-0"
+								>
+									<div className="font-medium">{p.address || 'No address'}</div>
+									<div className="text-muted-foreground">{p.pin}</div>
+								</button>
+							))}
+						</div>
+					)}
+					{searchText.length >= 2 && searchResults.length === 0 && (
+						<div className="absolute z-50 left-0 right-0 top-full mt-1 rounded border border-border bg-background shadow-lg px-2 py-1.5 text-xs text-muted-foreground">
+							No results
+						</div>
+					)}
 				</div>
 
 				{/* District toggles */}
@@ -684,6 +784,7 @@ export default function App() {
 					{districts && (
 						<DistrictLayers districts={districts} enabled={enabledDistricts} />
 					)}
+					<HighlightMarker property={highlightedProperty} />
 				</MapContainer>
 			</div>
 		</div>
