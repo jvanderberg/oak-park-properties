@@ -543,8 +543,21 @@ export default function App() {
 							setSearchOpen(true);
 							if (e.target.value.length < 2) setHighlightedProperty(null);
 						}}
-						className="w-full text-xs px-2 py-1.5 rounded border border-border bg-background"
+						className="w-full text-xs px-2 py-1.5 pr-6 rounded border border-border bg-background"
 					/>
+					{searchText && (
+						<button
+							type="button"
+							onClick={() => {
+								setSearchText('');
+								setHighlightedProperty(null);
+								setSearchOpen(false);
+							}}
+							className="absolute right-1.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground text-sm leading-none"
+						>
+							&times;
+						</button>
+					)}
 					{searchOpen &&
 						searchText.length >= 2 &&
 						searchResults.length >= 1 && (
