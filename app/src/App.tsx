@@ -180,10 +180,10 @@ export default function App() {
 
 			// Restore enabled district visibility from URL
 			const dVis = params.get('districts');
-			if (dVis !== null) {
+			if (dVis !== null && dVis !== '') {
 				const enabled = new Set<string>();
 				for (const k of dVis.split(',')) {
-					const name = DISTRICT_KEYS[k.trim()];
+					const name = DISTRICT_KEYS[k.trim().toLowerCase()];
 					if (name) enabled.add(name);
 				}
 				setEnabledDistricts(enabled);
@@ -346,7 +346,7 @@ export default function App() {
 	// ── Render ────────────────────────────────────────────────────────
 
 	return (
-		<div className="flex h-dvh w-screen overflow-hidden">
+		<div className="flex h-full w-screen overflow-hidden">
 			{/* ── Mobile backdrop ──────────────────────────────────── */}
 			{isMobile && sidebarOpen && (
 				<button
@@ -360,7 +360,7 @@ export default function App() {
 			{/* ── Sidebar ──────────────────────────────────────────── */}
 			<div
 				className={[
-					'flex flex-col gap-4 bg-background border-r border-border overflow-y-auto p-4 transition-all duration-200 ease-in-out',
+					'flex flex-col gap-4 bg-background border-r border-border overflow-y-auto p-4 pt-[max(1rem,env(safe-area-inset-top))] pb-[max(1rem,env(safe-area-inset-bottom))] transition-all duration-200 ease-in-out',
 					isMobile
 						? `fixed inset-y-0 left-0 z-[1200] w-[85vw] max-w-80 shadow-xl ${sidebarOpen ? 'translate-x-0' : '-translate-x-full'}`
 						: `shrink-0 ${sidebarOpen ? 'w-80' : 'w-0 p-0 border-r-0 overflow-hidden'}`,
@@ -534,7 +534,8 @@ export default function App() {
 					<button
 						type="button"
 						onClick={toggleSidebar}
-						className="absolute top-3 left-14 z-[1000] w-9 h-9 rounded-lg bg-background/90 backdrop-blur-sm border border-border shadow-md flex items-center justify-center hover:bg-accent hover:text-accent-foreground"
+						className="absolute left-14 z-[1000] w-9 h-9 rounded-lg bg-background/90 backdrop-blur-sm border border-border shadow-md flex items-center justify-center hover:bg-accent hover:text-accent-foreground"
+						style={{ top: 'max(0.75rem, env(safe-area-inset-top, 0px))' }}
 						aria-label="Open sidebar"
 					>
 						<svg
@@ -558,7 +559,8 @@ export default function App() {
 				<button
 					type="button"
 					onClick={copyShareUrl}
-					className={`absolute top-3 z-[1000] w-9 h-9 rounded-lg bg-background/90 backdrop-blur-sm border border-border shadow-md flex items-center justify-center hover:bg-accent hover:text-accent-foreground ${!sidebarOpen ? 'left-[6.5rem]' : 'left-14'}`}
+					className={`absolute z-[1000] w-9 h-9 rounded-lg bg-background/90 backdrop-blur-sm border border-border shadow-md flex items-center justify-center hover:bg-accent hover:text-accent-foreground ${!sidebarOpen ? 'left-[6.5rem]' : 'left-14'}`}
+					style={{ top: 'max(0.75rem, env(safe-area-inset-top, 0px))' }}
 					aria-label="Copy share link"
 					title={copied ? 'Copied!' : 'Copy share link'}
 				>
