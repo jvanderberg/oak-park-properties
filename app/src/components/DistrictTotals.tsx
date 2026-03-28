@@ -34,7 +34,7 @@ export function DistrictTotals({ displayed }: DistrictTotalsProps) {
 	}
 
 	return (
-		<div className="absolute bottom-6 right-3 z-[1000] bg-background/90 backdrop-blur-sm rounded-lg border border-border px-3 py-2 shadow-md text-xs">
+		<div className="absolute bottom-6 right-3 z-[1000] bg-background/90 backdrop-blur-sm rounded-lg border border-border px-3 py-2 shadow-md text-xs max-sm:bottom-2 max-sm:right-2 max-sm:px-2 max-sm:py-1.5 max-sm:text-[10px] max-sm:max-w-[200px]">
 			<div className="font-medium text-sm mb-1.5">By District</div>
 			<table className="w-full">
 				<tbody>

@@ -7,7 +7,7 @@
  */
 
 import type { FeatureCollection } from 'geojson';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { MapContainer, TileLayer } from 'react-leaflet';
 import { Badge } from '@/components/ui/badge';
 import { Checkbox } from '@/components/ui/checkbox';
@@ -31,7 +31,27 @@ import {
 import type { ClassInfo, Property } from './types';
 import 'leaflet/dist/leaflet.css';
 
+function useIsMobile(breakpoint = 768) {
+	const [isMobile, setIsMobile] = useState(
+		() => window.innerWidth < breakpoint,
+	);
+	useEffect(() => {
+		const mq = window.matchMedia(`(max-width: ${breakpoint - 1}px)`);
+		const handler = (e: MediaQueryListEvent) => setIsMobile(e.matches);
+		mq.addEventListener('change', handler);
+		return () => mq.removeEventListener('change', handler);
+	}, [breakpoint]);
+	return isMobile;
+}
+
 export default function App() {
+	// ── Sidebar state ─────────────────────────────────────────────────
+	const isMobile = useIsMobile();
+	const [sidebarOpen, setSidebarOpen] = useState(
+		() => window.innerWidth >= 768,
+	);
+	const toggleSidebar = useCallback(() => setSidebarOpen((o) => !o), []);
+
 	// ── Data loading ──────────────────────────────────────────────────
 	const [properties, setProperties] = useState<Property[]>([]);
 	const [districts, setDistricts] = useState<FeatureCollection | null>(null);
@@ -183,12 +203,41 @@ export default function App() {
 	// ── Render ────────────────────────────────────────────────────────
 
 	return (
-		<div className="flex h-screen w-screen">
+		<div className="flex h-screen w-screen overflow-hidden">
+			{/* ── Mobile backdrop ──────────────────────────────────── */}
+			{isMobile && sidebarOpen && (
+				<button
+					type="button"
+					className="fixed inset-0 z-[1100] bg-black/40 cursor-default"
+					onClick={toggleSidebar}
+					aria-label="Close sidebar"
+				/>
+			)}
+
 			{/* ── Sidebar ──────────────────────────────────────────── */}
-			<div className="w-80 shrink-0 border-r border-border bg-background overflow-y-auto p-4 flex flex-col gap-4">
+			<div
+				className={[
+					'flex flex-col gap-4 bg-background border-r border-border overflow-y-auto p-4 transition-all duration-200 ease-in-out',
+					isMobile
+						? `fixed inset-y-0 left-0 z-[1200] w-[85vw] max-w-80 shadow-xl ${sidebarOpen ? 'translate-x-0' : '-translate-x-full'}`
+						: `shrink-0 ${sidebarOpen ? 'w-80' : 'w-0 p-0 border-r-0 overflow-hidden'}`,
+				].join(' ')}
+			>
 				<div className="flex items-center justify-between">
-					<h1 className="text-lg font-semibold">Oak Park Properties</h1>
-					<InfoButton />
+					<h1 className="text-lg font-semibold whitespace-nowrap">
+						Oak Park Properties
+					</h1>
+					<div className="flex items-center gap-1">
+						<InfoButton />
+						<button
+							type="button"
+							onClick={toggleSidebar}
+							className="w-6 h-6 rounded-full border border-border text-xs font-medium text-muted-foreground hover:bg-accent hover:text-accent-foreground"
+							aria-label="Close sidebar"
+						>
+							&#x2715;
+						</button>
+					</div>
 				</div>
 
 				{/* Address / PIN search */}
@@ -336,7 +385,33 @@ export default function App() {
 			</div>
 
 			{/* ── Map ──────────────────────────────────────────────── */}
-			<div className="flex-1 relative">
+			<div className="flex-1 relative min-w-0">
+				{/* Sidebar toggle button (visible when sidebar is closed) */}
+				{!sidebarOpen && (
+					<button
+						type="button"
+						onClick={toggleSidebar}
+						className="absolute top-3 left-3 z-[1000] w-9 h-9 rounded-lg bg-background/90 backdrop-blur-sm border border-border shadow-md flex items-center justify-center hover:bg-accent hover:text-accent-foreground"
+						aria-label="Open sidebar"
+					>
+						<svg
+							width="18"
+							height="18"
+							viewBox="0 0 24 24"
+							fill="none"
+							stroke="currentColor"
+							strokeWidth="2"
+							strokeLinecap="round"
+							strokeLinejoin="round"
+							aria-hidden="true"
+						>
+							<title>Open sidebar</title>
+							<line x1="3" y1="6" x2="21" y2="6" />
+							<line x1="3" y1="12" x2="21" y2="12" />
+							<line x1="3" y1="18" x2="21" y2="18" />
+						</svg>
+					</button>
+				)}
 				<DistrictTotals displayed={displayed} />
 				<MapContainer
 					center={OAK_PARK_CENTER}
