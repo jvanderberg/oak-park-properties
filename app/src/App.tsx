@@ -391,7 +391,7 @@ export default function App() {
 					<button
 						type="button"
 						onClick={toggleSidebar}
-						className="absolute top-3 left-3 z-[1000] w-9 h-9 rounded-lg bg-background/90 backdrop-blur-sm border border-border shadow-md flex items-center justify-center hover:bg-accent hover:text-accent-foreground"
+						className="absolute top-3 left-14 z-[1000] w-9 h-9 rounded-lg bg-background/90 backdrop-blur-sm border border-border shadow-md flex items-center justify-center hover:bg-accent hover:text-accent-foreground"
 						aria-label="Open sidebar"
 					>
 						<svg
