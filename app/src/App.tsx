@@ -178,6 +178,17 @@ export default function App() {
 				setDistrictFilter(DISTRICT_KEYS[dKey]);
 			}
 
+			// Restore enabled district visibility from URL
+			const dVis = params.get('districts');
+			if (dVis !== null) {
+				const enabled = new Set<string>();
+				for (const k of dVis.split(',')) {
+					const name = DISTRICT_KEYS[k.trim()];
+					if (name) enabled.add(name);
+				}
+				setEnabledDistricts(enabled);
+			}
+
 			// Restore class selection from bitfield, or select all
 			const classBits = params.get('classes');
 			if (classBits) {
@@ -193,10 +204,21 @@ export default function App() {
 		if (!didInit.current) return;
 		const params = new URLSearchParams();
 
-		// District filter
+		// District filter (quick filter selection)
 		if (districtFilter) {
 			const key = DISTRICT_TO_KEY[districtFilter];
 			if (key) params.set('district', key);
+		}
+
+		// Enabled district visibility — omit if all 3 are enabled (default)
+		const allDistrictNames = Object.keys(DISTRICT_COLORS);
+		const allDistrictsEnabled = allDistrictNames.every((n) => enabledDistricts.has(n));
+		if (!allDistrictsEnabled) {
+			const keys = allDistrictNames
+				.filter((n) => enabledDistricts.has(n))
+				.map((n) => DISTRICT_TO_KEY[n])
+				.filter(Boolean);
+			params.set('districts', keys.join(','));
 		}
 
 		// Class bitfield — omit if all are selected (default state)
@@ -210,7 +232,7 @@ export default function App() {
 			? `${window.location.pathname}?${qs}`
 			: window.location.pathname;
 		window.history.replaceState(null, '', newUrl);
-	}, [selectedClasses, districtFilter, allClassCodes]);
+	}, [selectedClasses, districtFilter, enabledDistricts, allClassCodes]);
 
 	// ── Derived data ─────────────────────────────────────────────────
 
@@ -324,7 +346,7 @@ export default function App() {
 	// ── Render ────────────────────────────────────────────────────────
 
 	return (
-		<div className="flex h-screen w-screen overflow-hidden">
+		<div className="flex h-dvh w-screen overflow-hidden">
 			{/* ── Mobile backdrop ──────────────────────────────────── */}
 			{isMobile && sidebarOpen && (
 				<button

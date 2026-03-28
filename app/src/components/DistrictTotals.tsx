@@ -53,7 +53,7 @@ export function DistrictTotals({ displayed }: DistrictTotalsProps) {
 	const panelId = 'district-totals-content';
 
 	return (
-		<div className="absolute bottom-8 right-3 z-[1000] bg-background/90 backdrop-blur-sm rounded-lg border border-border shadow-md text-xs max-sm:bottom-6 max-sm:right-2 max-sm:text-[10px] max-sm:max-w-[200px]">
+		<div className="absolute bottom-8 right-3 z-[1000] bg-background/90 backdrop-blur-sm rounded-lg border border-border shadow-md text-xs max-sm:bottom-16 max-sm:right-2 max-sm:text-[10px] max-sm:max-w-[200px]">
 			<button
 				type="button"
 				className="flex items-center justify-between w-full font-medium text-sm px-3 py-2 max-sm:px-2 max-sm:py-1.5 cursor-pointer"
