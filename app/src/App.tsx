@@ -302,10 +302,23 @@ export default function App() {
 	// ── Share URL ────────────────────────────────────────────────────
 	const [copied, setCopied] = useState(false);
 	function copyShareUrl() {
-		navigator.clipboard.writeText(window.location.href).then(() => {
-			setCopied(true);
-			setTimeout(() => setCopied(false), 2000);
-		});
+		navigator.clipboard.writeText(window.location.href).then(
+			() => {
+				setCopied(true);
+				setTimeout(() => setCopied(false), 2000);
+			},
+			() => {
+				// Fallback: select a temporary input so the user can Ctrl+C
+				const input = document.createElement('input');
+				input.value = window.location.href;
+				document.body.appendChild(input);
+				input.select();
+				document.execCommand('copy');
+				document.body.removeChild(input);
+				setCopied(true);
+				setTimeout(() => setCopied(false), 2000);
+			},
+		);
 	}
 
 	// ── Render ────────────────────────────────────────────────────────
