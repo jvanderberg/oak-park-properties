@@ -7,7 +7,13 @@
  */
 
 import type { FeatureCollection } from 'geojson';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import {
+	useCallback,
+	useEffect,
+	useMemo,
+	useRef,
+	useState,
+} from 'react';
 import { MapContainer, TileLayer } from 'react-leaflet';
 import { Badge } from '@/components/ui/badge';
 import { Checkbox } from '@/components/ui/checkbox';
@@ -30,6 +36,55 @@ import {
 } from './constants';
 import type { ClassInfo, Property } from './types';
 import 'leaflet/dist/leaflet.css';
+
+// Short keys for district names used in URL params
+const DISTRICT_KEYS: Record<string, string> = {
+	flw: 'Frank Lloyd Wright',
+	rop: 'Ridgeland - Oak Park',
+	gun: 'Gunderson',
+};
+const DISTRICT_TO_KEY = Object.fromEntries(
+	Object.entries(DISTRICT_KEYS).map(([k, v]) => [v, k]),
+);
+
+/** Pack a set of selected class indices into a base64url-encoded bitfield. */
+function encodeClassBits(
+	allClasses: string[],
+	selected: Set<string>,
+): string {
+	const byteCount = Math.ceil(allClasses.length / 8);
+	const bytes = new Uint8Array(byteCount);
+	for (let i = 0; i < allClasses.length; i++) {
+		if (selected.has(allClasses[i])) {
+			bytes[i >> 3] |= 1 << (i & 7);
+		}
+	}
+	// base64url encode
+	let binary = '';
+	for (const b of bytes) binary += String.fromCharCode(b);
+	return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+}
+
+/** Decode a base64url-encoded bitfield back into a set of class codes. */
+function decodeClassBits(
+	encoded: string,
+	allClasses: string[],
+): Set<string> {
+	try {
+		const b64 = encoded.replace(/-/g, '+').replace(/_/g, '/');
+		const binary = atob(b64);
+		const result = new Set<string>();
+		for (let i = 0; i < allClasses.length; i++) {
+			const byte = binary.charCodeAt(i >> 3);
+			if (byte & (1 << (i & 7))) {
+				result.add(allClasses[i]);
+			}
+		}
+		return result;
+	} catch {
+		return new Set(allClasses);
+	}
+}
 
 function useIsMobile(breakpoint = 768) {
 	const [isMobile, setIsMobile] = useState(
@@ -104,14 +159,58 @@ export default function App() {
 			});
 	}, [properties]);
 
-	// Select all classes on initial load (once)
+	// Sorted class codes used as the stable ordering for bitfield encoding
+	const allClassCodes = useMemo(
+		() => classInfos.map((c) => c.class),
+		[classInfos],
+	);
+
+	// Restore state from URL on initial load (once data is ready)
 	const didInit = useRef(false);
 	useEffect(() => {
 		if (!didInit.current && classInfos.length > 0) {
 			didInit.current = true;
-			setSelectedClasses(new Set(classInfos.map((c) => c.class)));
+			const params = new URLSearchParams(window.location.search);
+
+			// Restore district filter
+			const dKey = params.get('district');
+			if (dKey && DISTRICT_KEYS[dKey]) {
+				setDistrictFilter(DISTRICT_KEYS[dKey]);
+			}
+
+			// Restore class selection from bitfield, or select all
+			const classBits = params.get('classes');
+			if (classBits) {
+				setSelectedClasses(decodeClassBits(classBits, allClassCodes));
+			} else {
+				setSelectedClasses(new Set(allClassCodes));
+			}
 		}
-	}, [classInfos]);
+	}, [classInfos, allClassCodes]);
+
+	// Sync filter state to URL (after init)
+	useEffect(() => {
+		if (!didInit.current) return;
+		const params = new URLSearchParams();
+
+		// District filter
+		if (districtFilter) {
+			const key = DISTRICT_TO_KEY[districtFilter];
+			if (key) params.set('district', key);
+		}
+
+		// Class bitfield — omit if all are selected (default state)
+		const allSelected = allClassCodes.length > 0 && selectedClasses.size === allClassCodes.length;
+		if (!allSelected && allClassCodes.length > 0) {
+			params.set('classes', encodeClassBits(allClassCodes, selectedClasses));
+		}
+
+		const qs = params.toString();
+		const newUrl = qs
+			? `${window.location.pathname}?${qs}`
+			: window.location.pathname;
+		window.history.replaceState(null, '', newUrl);
+	}, [selectedClasses, districtFilter, allClassCodes]);
 
 	// ── Derived data ─────────────────────────────────────────────────
 
@@ -198,6 +297,15 @@ export default function App() {
 		a.download = 'oak-park-properties.csv';
 		a.click();
 		URL.revokeObjectURL(url);
+	}
+
+	// ── Share URL ────────────────────────────────────────────────────
+	const [copied, setCopied] = useState(false);
+	function copyShareUrl() {
+		navigator.clipboard.writeText(window.location.href).then(() => {
+			setCopied(true);
+			setTimeout(() => setCopied(false), 2000);
+		});
 	}
 
 	// ── Render ────────────────────────────────────────────────────────
@@ -386,7 +494,7 @@ export default function App() {
 
 			{/* ── Map ──────────────────────────────────────────────── */}
 			<div className="flex-1 relative min-w-0">
-				{/* Sidebar toggle button (visible when sidebar is closed) */}
+				{/* Sidebar toggle + share buttons */}
 				{!sidebarOpen && (
 					<button
 						type="button"
@@ -412,6 +520,45 @@ export default function App() {
 						</svg>
 					</button>
 				)}
+				<button
+					type="button"
+					onClick={copyShareUrl}
+					className={`absolute top-3 z-[1000] w-9 h-9 rounded-lg bg-background/90 backdrop-blur-sm border border-border shadow-md flex items-center justify-center hover:bg-accent hover:text-accent-foreground ${!sidebarOpen ? 'left-[6.5rem]' : 'left-14'}`}
+					aria-label="Copy share link"
+					title={copied ? 'Copied!' : 'Copy share link'}
+				>
+					{copied ? (
+						<svg
+							width="18"
+							height="18"
+							viewBox="0 0 24 24"
+							fill="none"
+							stroke="currentColor"
+							strokeWidth="2"
+							strokeLinecap="round"
+							strokeLinejoin="round"
+							aria-hidden="true"
+						>
+							<polyline points="20 6 9 17 4 12" />
+						</svg>
+					) : (
+						<svg
+							width="18"
+							height="18"
+							viewBox="0 0 24 24"
+							fill="none"
+							stroke="currentColor"
+							strokeWidth="2"
+							strokeLinecap="round"
+							strokeLinejoin="round"
+							aria-hidden="true"
+						>
+							<path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8" />
+							<polyline points="16 6 12 2 8 6" />
+							<line x1="12" y1="2" x2="12" y2="15" />
+						</svg>
+					)}
+				</button>
 				<DistrictTotals displayed={displayed} />
 				<MapContainer
 					center={OAK_PARK_CENTER}
