@@ -3,7 +3,7 @@
  * Positioned at bottom-right of the map.
  */
 
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import { DISTRICT_COLORS } from '../constants';
 import type { Property } from '../types';
 
@@ -12,6 +12,8 @@ interface DistrictTotalsProps {
 }
 
 export function DistrictTotals({ displayed }: DistrictTotalsProps) {
+	const [collapsed, setCollapsed] = useState(false);
+
 	const { counts, noDistrict } = useMemo(() => {
 		const counts: Record<string, number> = {};
 		let noDistrict = 0;
@@ -34,8 +36,31 @@ export function DistrictTotals({ displayed }: DistrictTotalsProps) {
 	}
 
 	return (
-		<div className="absolute bottom-6 right-3 z-[1000] bg-background/90 backdrop-blur-sm rounded-lg border border-border px-3 py-2 shadow-md text-xs max-sm:bottom-2 max-sm:right-2 max-sm:px-2 max-sm:py-1.5 max-sm:text-[10px] max-sm:max-w-[200px]">
-			<div className="font-medium text-sm mb-1.5">By District</div>
+		<div className="absolute bottom-6 right-3 z-[1000] bg-background/90 backdrop-blur-sm rounded-lg border border-border shadow-md text-xs max-sm:bottom-2 max-sm:right-2 max-sm:text-[10px] max-sm:max-w-[200px]">
+			<button
+				type="button"
+				className="flex items-center justify-between w-full font-medium text-sm px-3 py-2 max-sm:px-2 max-sm:py-1.5 cursor-pointer"
+				onClick={() => setCollapsed((c) => !c)}
+				aria-expanded={!collapsed}
+			>
+				<span>By District</span>
+				<svg
+					className={`w-3.5 h-3.5 ml-2 shrink-0 transition-transform ${collapsed ? '' : 'rotate-180'}`}
+					viewBox="0 0 24 24"
+					fill="none"
+					stroke="currentColor"
+					strokeWidth="2.5"
+					strokeLinecap="round"
+					strokeLinejoin="round"
+					aria-hidden="true"
+				>
+					<polyline points="18 15 12 9 6 15" />
+				</svg>
+			</button>
+			<div
+				className={`overflow-hidden transition-all duration-200 ${collapsed ? 'max-h-0' : 'max-h-96'}`}
+			>
+			<div className="px-3 pb-2 max-sm:px-2 max-sm:pb-1.5">
 			<table className="w-full">
 				<tbody>
 					{Object.entries(DISTRICT_COLORS).map(([name, color]) => {
@@ -93,6 +118,8 @@ export function DistrictTotals({ displayed }: DistrictTotalsProps) {
 					</tr>
 				</tbody>
 			</table>
+			</div>
+			</div>
 		</div>
 	);
 }
