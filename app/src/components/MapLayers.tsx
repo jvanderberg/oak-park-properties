@@ -14,20 +14,26 @@
 
 import type { FeatureCollection } from 'geojson';
 import L from 'leaflet';
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useMap } from 'react-leaflet';
-import { classColor, DISTRICT_COLORS } from '../constants';
+import { classColor, DISTRICT_COLORS, zoningColor } from '../constants';
 import type { Property } from '../types';
 
 // ── MapBounds ────────────────────────────────────────────────────────
 // Fits the map viewport to the bounding box of all properties on first load.
 
-export function MapBounds({ properties }: { properties: Property[] }) {
+export function MapBounds({
+	properties,
+	skip,
+}: {
+	properties: Property[];
+	skip?: boolean;
+}) {
 	const map = useMap();
 	const didFit = useRef(false);
 
 	useEffect(() => {
-		if (didFit.current || properties.length === 0) return;
+		if (skip || didFit.current || properties.length === 0) return;
 		didFit.current = true;
 		const lats = properties.map((p) => p.lat);
 		const lons = properties.map((p) => p.lon);
@@ -35,7 +41,31 @@ export function MapBounds({ properties }: { properties: Property[] }) {
 			[Math.min(...lats), Math.min(...lons)],
 			[Math.max(...lats), Math.max(...lons)],
 		]);
-	}, [properties, map]);
+	}, [properties, map, skip]);
+
+	return null;
+}
+
+// ── MapPositionSync ──────────────────────────────────────────────────
+// Calls onMove whenever the map is panned or zoomed.
+
+export function MapPositionSync({
+	onMove,
+}: {
+	onMove: (lat: number, lng: number, zoom: number) => void;
+}) {
+	const map = useMap();
+
+	useEffect(() => {
+		function handler() {
+			const { lat, lng } = map.getCenter();
+			onMove(lat, lng, map.getZoom());
+		}
+		map.on('moveend', handler);
+		return () => {
+			map.off('moveend', handler);
+		};
+	}, [map, onMove]);
 
 	return null;
 }
@@ -111,6 +141,53 @@ export function DistrictLayers({
 	return null;
 }
 
+// ── ZoningLayer ──────────────────────────────────────────────────────
+// Renders Oak Park zoning district polygons as semi-transparent fills.
+
+export function ZoningLayer({
+	zoning,
+	enabled,
+}: {
+	zoning: FeatureCollection;
+	enabled: Set<string>;
+}) {
+	const map = useMap();
+	const layerRef = useRef<L.LayerGroup | null>(null);
+
+	useEffect(() => {
+		if (!map.getPane('zoning')) {
+			const pane = map.createPane('zoning');
+			pane.style.zIndex = '440';
+		}
+
+		if (!layerRef.current) {
+			layerRef.current = L.layerGroup().addTo(map);
+		}
+		const group = layerRef.current;
+		group.clearLayers();
+
+		for (const feature of zoning.features) {
+			const zoned: string = feature.properties?.ZONED ?? '';
+			if (!enabled.has(zoned)) continue;
+			const color = zoningColor(zoned);
+			const desc: string = feature.properties?.ZONINGDESCRIPTION ?? '';
+			L.geoJSON(feature, {
+				style: { color, weight: 1, fillColor: color, fillOpacity: 0.7 },
+				pane: 'zoning',
+				onEachFeature: (_f, layer) => {
+					layer.bindTooltip(`${zoned} — ${desc}`);
+				},
+			}).addTo(group);
+		}
+
+		return () => {
+			group.clearLayers();
+		};
+	}, [zoning, enabled, map]);
+
+	return null;
+}
+
 // ── PropertyMarkers ──────────────────────────────────────────────────
 // Renders property parcels as filled polygons where geometry is available,
 // falling back to circle markers for properties without parcel shapes.
@@ -152,16 +229,36 @@ function buildMultiPopup(units: Property[]): HTMLElement {
 	return div;
 }
 
+function zoomToRadius(zoom: number): number {
+	if (zoom <= 15) return 1;
+	if (zoom <= 16) return 2;
+	if (zoom <= 17) return 4;
+	return 6;
+}
+
 export function PropertyMarkers({
 	properties,
 	parcels,
+	showBoundaries,
 }: {
 	properties: Property[];
 	parcels: FeatureCollection | null;
+	showBoundaries: boolean;
 }) {
 	const map = useMap();
 	const layerRef = useRef<L.LayerGroup | null>(null);
 	const rendererRef = useRef<L.Canvas | null>(null);
+	const [radius, setRadius] = useState(() => zoomToRadius(map.getZoom()));
+
+	useEffect(() => {
+		function onZoomEnd() {
+			setRadius(zoomToRadius(map.getZoom()));
+		}
+		map.on('zoomend', onZoomEnd);
+		return () => {
+			map.off('zoomend', onZoomEnd);
+		};
+	}, [map]);
 
 	useEffect(() => {
 		if (!map.getPane('markers')) {
@@ -185,7 +282,7 @@ export function PropertyMarkers({
 		// Group parcel features by geometry identity (condo units share a parent shape).
 		// Use first coordinate as a cheap fingerprint to deduplicate.
 		const renderedPins = new Set<string>();
-		if (parcels) {
+		if (showBoundaries && parcels) {
 			const geomGroups = new Map<
 				string,
 				{ coords: [number, number][][]; pins: string[] }
@@ -240,7 +337,7 @@ export function PropertyMarkers({
 			if (renderedPins.has(p.pin)) continue;
 			const color = classColor(p.class);
 			L.circleMarker([p.lat, p.lon], {
-				radius: 3,
+				radius,
 				color,
 				fillColor: color,
 				fillOpacity: 0.7,
@@ -255,7 +352,7 @@ export function PropertyMarkers({
 		return () => {
 			layer.clearLayers();
 		};
-	}, [properties, parcels, map]);
+	}, [properties, parcels, showBoundaries, map, radius]);
 
 	return null;
 }

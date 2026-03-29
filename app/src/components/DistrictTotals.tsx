@@ -53,10 +53,7 @@ export function DistrictTotals({ displayed }: DistrictTotalsProps) {
 	const panelId = 'district-totals-content';
 
 	return (
-		<div
-			className="absolute right-3 z-[1000] bg-background/90 backdrop-blur-sm rounded-lg border border-border shadow-md text-xs max-sm:right-2 max-sm:text-[10px] max-sm:max-w-[200px]"
-			style={{ bottom: 'max(2rem, calc(env(safe-area-inset-bottom, 0px) + 1rem))' }}
-		>
+		<div className="bg-background/90 backdrop-blur-sm rounded-lg border border-border shadow-md text-xs max-sm:text-[10px] max-sm:max-w-[200px]">
 			<button
 				type="button"
 				className="flex items-center justify-between w-full font-medium text-sm px-3 py-2 max-sm:px-2 max-sm:py-1.5 cursor-pointer"
@@ -78,9 +75,8 @@ export function DistrictTotals({ displayed }: DistrictTotalsProps) {
 					<polyline points="18 15 12 9 6 15" />
 				</svg>
 			</button>
-			<div
+			<section
 				id={panelId}
-				role="region"
 				className="overflow-hidden transition-[max-height] duration-200 ease-in-out"
 				style={{ maxHeight: collapsed ? 0 : contentHeight }}
 			>
@@ -143,7 +139,7 @@ export function DistrictTotals({ displayed }: DistrictTotalsProps) {
 						</tbody>
 					</table>
 				</div>
-			</div>
+			</section>
 		</div>
 	);
 }

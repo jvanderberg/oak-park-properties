@@ -12,4 +12,7 @@ export default defineConfig({
 			'@': path.resolve(__dirname, './app/src'),
 		},
 	},
+	server: {
+		allowedHosts: true,
+	},
 });
