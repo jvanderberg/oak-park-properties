@@ -7,13 +7,12 @@
  */
 
 import type { FeatureCollection } from 'geojson';
-import {
-	useCallback,
-	useEffect,
-	useMemo,
-	useRef,
-	useState,
-} from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+
+function readInitialParams() {
+	return new URLSearchParams(window.location.search);
+}
+
 import { MapContainer, TileLayer } from 'react-leaflet';
 import { Badge } from '@/components/ui/badge';
 import { Checkbox } from '@/components/ui/checkbox';
@@ -25,14 +24,20 @@ import {
 	DistrictLayers,
 	HighlightMarker,
 	MapBounds,
+	MapPositionSync,
 	PropertyMarkers,
+	ZoningLayer,
 } from './components/MapLayers';
 import { SearchInput } from './components/SearchInput';
+import { ZoneTotals } from './components/ZoneTotals';
 import {
 	classColor,
 	DISTRICT_COLORS,
 	MAJOR_CLASS_GROUPS,
 	OAK_PARK_CENTER,
+	ZONE_CATEGORIES,
+	ZONE_CODES,
+	ZONE_COLORS,
 } from './constants';
 import type { ClassInfo, Property } from './types';
 import 'leaflet/dist/leaflet.css';
@@ -48,10 +53,7 @@ const DISTRICT_TO_KEY = Object.fromEntries(
 );
 
 /** Pack a set of selected class indices into a base64url-encoded bitfield. */
-function encodeClassBits(
-	allClasses: string[],
-	selected: Set<string>,
-): string {
+function encodeClassBits(allClasses: string[], selected: Set<string>): string {
 	const byteCount = Math.ceil(allClasses.length / 8);
 	const bytes = new Uint8Array(byteCount);
 	for (let i = 0; i < allClasses.length; i++) {
@@ -62,14 +64,14 @@ function encodeClassBits(
 	// base64url encode
 	let binary = '';
 	for (const b of bytes) binary += String.fromCharCode(b);
-	return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+	return btoa(binary)
+		.replace(/\+/g, '-')
+		.replace(/\//g, '_')
+		.replace(/=+$/, '');
 }
 
 /** Decode a base64url-encoded bitfield back into a set of class codes. */
-function decodeClassBits(
-	encoded: string,
-	allClasses: string[],
-): Set<string> {
+function decodeClassBits(encoded: string, allClasses: string[]): Set<string> {
 	try {
 		const b64 = encoded.replace(/-/g, '+').replace(/_/g, '/');
 		const binary = atob(b64);
@@ -112,6 +114,7 @@ export default function App() {
 	const [districts, setDistricts] = useState<FeatureCollection | null>(null);
 	const [boundary, setBoundary] = useState<FeatureCollection | null>(null);
 	const [parcels, setParcels] = useState<FeatureCollection | null>(null);
+	const [zoning, setZoning] = useState<FeatureCollection | null>(null);
 
 	useEffect(() => {
 		const base = import.meta.env.BASE_URL;
@@ -120,15 +123,69 @@ export default function App() {
 			fetch(`${base}districts.geojson`).then((r) => r.json()),
 			fetch(`${base}boundary.geojson`).then((r) => r.json()),
 			fetch(`${base}parcels.geojson`).then((r) => r.json()),
-		]).then(([props, dists, bound, parcs]) => {
+			fetch(`${base}zoning.geojson`).then((r) => r.json()),
+		]).then(([props, dists, bound, parcs, zon]) => {
 			setProperties(props);
 			setDistricts(dists);
 			setBoundary(bound);
 			setParcels(parcs);
+			setZoning(zon);
 		});
 	}, []);
 
+	// ── Map position state (persisted in URL) ────────────────────────
+	const [mapPos, setMapPos] = useState<{
+		lat: number;
+		lng: number;
+		zoom: number;
+	} | null>(() => {
+		const p = readInitialParams();
+		const lat = parseFloat(p.get('lat') ?? '');
+		const lng = parseFloat(p.get('lng') ?? '');
+		const zoom = parseInt(p.get('z') ?? '');
+		if (!isNaN(lat) && !isNaN(lng) && !isNaN(zoom)) return { lat, lng, zoom };
+		return null;
+	});
+
+	const [initialCenter] = useState<[number, number]>(() => {
+		const p = readInitialParams();
+		const lat = parseFloat(p.get('lat') ?? '');
+		const lng = parseFloat(p.get('lng') ?? '');
+		if (!isNaN(lat) && !isNaN(lng)) return [lat, lng];
+		return OAK_PARK_CENTER;
+	});
+
+	const [initialZoom] = useState(() => {
+		const p = readInitialParams();
+		const z = parseInt(p.get('z') ?? '');
+		return isNaN(z) ? 14 : z;
+	});
+
+	const handleMapMove = useCallback(
+		(lat: number, lng: number, zoom: number) => {
+			setMapPos({ lat, lng, zoom });
+		},
+		[],
+	);
+
 	// ── Filter state ─────────────────────────────────────────────────
+	const [zoningOpen, setZoningOpen] = useState(
+		() => readInitialParams().get('zo') === '1',
+	);
+	const [districtsOpen, setDistrictsOpen] = useState(
+		() => readInitialParams().get('di') !== '0',
+	);
+	const [classesOpen, setClassesOpen] = useState(
+		() => readInitialParams().get('cl') !== '0',
+	);
+	const [showBoundaries, setShowBoundaries] = useState(
+		() => readInitialParams().get('b') !== '0',
+	);
+	const [enabledZones, setEnabledZones] = useState<Set<string>>(() => {
+		const raw = readInitialParams().get('zones');
+		if (!raw) return new Set();
+		return decodeClassBits(raw, ZONE_CODES);
+	});
 	const [enabledDistricts, setEnabledDistricts] = useState<Set<string>>(
 		new Set(Object.keys(DISTRICT_COLORS)),
 	);
@@ -204,6 +261,26 @@ export default function App() {
 		if (!didInit.current) return;
 		const params = new URLSearchParams();
 
+		// Map position — omit if user hasn't moved from initial fitBounds
+		if (mapPos) {
+			params.set('lat', mapPos.lat.toFixed(5));
+			params.set('lng', mapPos.lng.toFixed(5));
+			params.set('z', String(mapPos.zoom));
+		}
+
+		// Display mode — omit when boundaries (default)
+		if (!showBoundaries) params.set('b', '0');
+
+		// Panel open states — omit when at default (zoningOpen=false, others=true)
+		if (zoningOpen) params.set('zo', '1');
+		if (!districtsOpen) params.set('di', '0');
+		if (!classesOpen) params.set('cl', '0');
+
+		// Enabled zones — omit when empty (default)
+		if (enabledZones.size > 0) {
+			params.set('zones', encodeClassBits(ZONE_CODES, enabledZones));
+		}
+
 		// District filter (quick filter selection)
 		if (districtFilter) {
 			const key = DISTRICT_TO_KEY[districtFilter];
@@ -212,7 +289,9 @@ export default function App() {
 
 		// Enabled district visibility — omit if all 3 are enabled (default)
 		const allDistrictNames = Object.keys(DISTRICT_COLORS);
-		const allDistrictsEnabled = allDistrictNames.every((n) => enabledDistricts.has(n));
+		const allDistrictsEnabled = allDistrictNames.every((n) =>
+			enabledDistricts.has(n),
+		);
 		if (!allDistrictsEnabled) {
 			const keys = allDistrictNames
 				.filter((n) => enabledDistricts.has(n))
@@ -222,7 +301,8 @@ export default function App() {
 		}
 
 		// Class bitfield — omit if all are selected (default state)
-		const allSelected = allClassCodes.length > 0 && selectedClasses.size === allClassCodes.length;
+		const allSelected =
+			allClassCodes.length > 0 && selectedClasses.size === allClassCodes.length;
 		if (!allSelected && allClassCodes.length > 0) {
 			params.set('classes', encodeClassBits(allClassCodes, selectedClasses));
 		}
@@ -232,7 +312,18 @@ export default function App() {
 			? `${window.location.pathname}?${qs}`
 			: window.location.pathname;
 		window.history.replaceState(null, '', newUrl);
-	}, [selectedClasses, districtFilter, enabledDistricts, allClassCodes]);
+	}, [
+		mapPos,
+		showBoundaries,
+		zoningOpen,
+		districtsOpen,
+		classesOpen,
+		enabledZones,
+		selectedClasses,
+		districtFilter,
+		enabledDistricts,
+		allClassCodes,
+	]);
 
 	// ── Derived data ─────────────────────────────────────────────────
 
@@ -389,133 +480,312 @@ export default function App() {
 					onHighlight={setHighlightedProperty}
 				/>
 
-				{/* Historic district visibility toggles */}
-				<span className="text-sm font-medium">Historic Districts</span>
-				<div className="flex flex-col gap-1.5">
-					{Object.entries(DISTRICT_COLORS).map(([name, color]) => (
-						<div key={name} className="flex items-center gap-2">
-							<Checkbox
-								id={`district-${name}`}
-								checked={enabledDistricts.has(name)}
-								onCheckedChange={() => {
-									setEnabledDistricts((prev) => {
-										const next = new Set(prev);
-										if (next.has(name)) next.delete(name);
-										else next.add(name);
-										return next;
-									});
-								}}
-							/>
-							<Label
-								htmlFor={`district-${name}`}
-								className="text-xs cursor-pointer flex items-center gap-1.5"
-							>
-								<div
-									className="w-3 h-3 rounded-sm shrink-0"
-									style={{
-										backgroundColor: color,
-										opacity: 0.4,
-										border: `2px solid ${color}`,
-									}}
-								/>
-								{name}
-							</Label>
-						</div>
-					))}
+				{/* Display mode toggle */}
+				<div className="flex gap-1 text-xs">
+					<button
+						type="button"
+						onClick={() => setShowBoundaries(true)}
+						className={`flex-1 py-1 rounded border ${showBoundaries ? 'bg-foreground text-background border-foreground' : 'border-border hover:bg-accent'}`}
+					>
+						Boundaries
+					</button>
+					<button
+						type="button"
+						onClick={() => setShowBoundaries(false)}
+						className={`flex-1 py-1 rounded border ${!showBoundaries ? 'bg-foreground text-background border-foreground' : 'border-border hover:bg-accent'}`}
+					>
+						Dots
+					</button>
 				</div>
 
-				{/* Property class filter header with count and All/None */}
+				{/* Zoning overlay — per-zone toggles grouped by category */}
 				<div className="flex items-center justify-between">
-					<span className="text-sm font-medium">Property Class</span>
-					<div className="flex items-center gap-2">
-						<Badge variant="secondary">
-							{displayed.length.toLocaleString()} /{' '}
-							{properties.length.toLocaleString()}
-						</Badge>
+					<button
+						type="button"
+						className="flex items-center gap-1 text-sm font-medium"
+						onClick={() => setZoningOpen((o) => !o)}
+					>
+						<svg
+							width="12"
+							height="12"
+							viewBox="0 0 24 24"
+							fill="none"
+							stroke="currentColor"
+							strokeWidth="2.5"
+							strokeLinecap="round"
+							strokeLinejoin="round"
+							aria-hidden="true"
+							className={`transition-transform ${zoningOpen ? 'rotate-180' : ''}`}
+						>
+							<polyline points="6 9 12 15 18 9" />
+						</svg>
+						Zoning Overlay
+					</button>
+					{zoningOpen && (
 						<div className="flex gap-2 text-xs">
 							<button
 								type="button"
-								onClick={selectAll}
 								className="text-primary underline"
+								onClick={() =>
+									setEnabledZones(new Set(Object.keys(ZONE_COLORS)))
+								}
 							>
 								All
 							</button>
 							<button
 								type="button"
-								onClick={selectNone}
 								className="text-primary underline"
+								onClick={() => setEnabledZones(new Set())}
 							>
 								None
 							</button>
 						</div>
+					)}
+				</div>
+				{zoningOpen && (
+					<div className="flex flex-col gap-2">
+						{ZONE_CATEGORIES.map((cat) => (
+							<div key={cat.label}>
+								<div className="text-xs font-medium text-muted-foreground mb-1">
+									{cat.label}
+								</div>
+								<div className="flex flex-col gap-1">
+									{cat.zones.map(({ code, description }) => (
+										<div key={code} className="flex items-center gap-2">
+											<Checkbox
+												id={`zone-${code}`}
+												checked={enabledZones.has(code)}
+												onCheckedChange={() => {
+													setEnabledZones((prev) => {
+														const next = new Set(prev);
+														if (next.has(code)) next.delete(code);
+														else next.add(code);
+														return next;
+													});
+												}}
+											/>
+											<Label
+												htmlFor={`zone-${code}`}
+												className="text-xs cursor-pointer flex items-center gap-1.5"
+											>
+												<div
+													className="w-3 h-3 rounded-sm shrink-0"
+													style={{
+														backgroundColor: ZONE_COLORS[code],
+														opacity: 0.7,
+														border: `1.5px solid ${ZONE_COLORS[code]}`,
+													}}
+												/>
+												<span className="font-mono shrink-0">{code}</span>
+												<span className="text-muted-foreground truncate">
+													{description}
+												</span>
+											</Label>
+										</div>
+									))}
+								</div>
+							</div>
+						))}
 					</div>
+				)}
+
+				{/* Historic district visibility toggles */}
+				<div className="flex items-center justify-between">
+					<button
+						type="button"
+						className="flex items-center gap-1 text-sm font-medium"
+						onClick={() => setDistrictsOpen((o) => !o)}
+					>
+						<svg
+							width="12"
+							height="12"
+							viewBox="0 0 24 24"
+							fill="none"
+							stroke="currentColor"
+							strokeWidth="2.5"
+							strokeLinecap="round"
+							strokeLinejoin="round"
+							aria-hidden="true"
+							className={`transition-transform ${districtsOpen ? 'rotate-180' : ''}`}
+						>
+							<polyline points="6 9 12 15 18 9" />
+						</svg>
+						Historic Districts
+					</button>
+					{districtsOpen && (
+						<div className="flex gap-2 text-xs">
+							<button
+								type="button"
+								className="text-primary underline"
+								onClick={() =>
+									setEnabledDistricts(new Set(Object.keys(DISTRICT_COLORS)))
+								}
+							>
+								All
+							</button>
+							<button
+								type="button"
+								className="text-primary underline"
+								onClick={() => setEnabledDistricts(new Set())}
+							>
+								None
+							</button>
+						</div>
+					)}
+				</div>
+				{districtsOpen && (
+					<div className="flex flex-col gap-1.5">
+						{Object.entries(DISTRICT_COLORS).map(([name, color]) => (
+							<div key={name} className="flex items-center gap-2">
+								<Checkbox
+									id={`district-${name}`}
+									checked={enabledDistricts.has(name)}
+									onCheckedChange={() => {
+										setEnabledDistricts((prev) => {
+											const next = new Set(prev);
+											if (next.has(name)) next.delete(name);
+											else next.add(name);
+											return next;
+										});
+									}}
+								/>
+								<Label
+									htmlFor={`district-${name}`}
+									className="text-xs cursor-pointer flex items-center gap-1.5"
+								>
+									<div
+										className="w-3 h-3 rounded-sm shrink-0"
+										style={{
+											backgroundColor: color,
+											opacity: 0.4,
+											border: `2px solid ${color}`,
+										}}
+									/>
+									{name}
+								</Label>
+							</div>
+						))}
+					</div>
+				)}
+
+				{/* Property class filter header with count and All/None */}
+				<div className="flex items-center justify-between">
+					<button
+						type="button"
+						className="flex items-center gap-1 text-sm font-medium"
+						onClick={() => setClassesOpen((o) => !o)}
+					>
+						<svg
+							width="12"
+							height="12"
+							viewBox="0 0 24 24"
+							fill="none"
+							stroke="currentColor"
+							strokeWidth="2.5"
+							strokeLinecap="round"
+							strokeLinejoin="round"
+							aria-hidden="true"
+							className={`transition-transform ${classesOpen ? 'rotate-180' : ''}`}
+						>
+							<polyline points="6 9 12 15 18 9" />
+						</svg>
+						Property Class
+					</button>
+					{classesOpen && (
+						<div className="flex items-center gap-2">
+							<Badge variant="secondary">
+								{displayed.length.toLocaleString()} /{' '}
+								{properties.length.toLocaleString()}
+							</Badge>
+							<div className="flex gap-2 text-xs">
+								<button
+									type="button"
+									onClick={selectAll}
+									className="text-primary underline"
+								>
+									All
+								</button>
+								<button
+									type="button"
+									onClick={selectNone}
+									className="text-primary underline"
+								>
+									None
+								</button>
+							</div>
+						</div>
+					)}
 				</div>
 
 				{/* Quick filter: major class groups + historic districts */}
-				<select
-					className="text-xs px-2 py-1 rounded border border-border bg-background"
-					defaultValue=""
-					onChange={(e) => {
-						if (!e.target.value) return;
-						const val = e.target.value;
-						if (val.startsWith('district:')) {
-							selectByDistrict(val.slice('district:'.length));
-						} else {
-							selectByPrefix(val);
-						}
-						e.target.value = '';
-					}}
-				>
-					<option value="" disabled>
-						Quick filter...
-					</option>
-					<optgroup label="Major Class">
-						{MAJOR_CLASS_GROUPS.map((g) => (
-							<option key={g.prefix} value={g.prefix}>
-								{g.label} — {g.description}
-							</option>
-						))}
-					</optgroup>
-					<optgroup label="Historic District">
-						{Object.keys(DISTRICT_COLORS).map((name) => (
-							<option key={name} value={`district:${name}`}>
-								{name}
-							</option>
-						))}
-					</optgroup>
-				</select>
+				{classesOpen && (
+					<select
+						className="text-xs px-2 py-1 rounded border border-border bg-background"
+						defaultValue=""
+						onChange={(e) => {
+							if (!e.target.value) return;
+							const val = e.target.value;
+							if (val.startsWith('district:')) {
+								selectByDistrict(val.slice('district:'.length));
+							} else {
+								selectByPrefix(val);
+							}
+							e.target.value = '';
+						}}
+					>
+						<option value="" disabled>
+							Quick filter...
+						</option>
+						<optgroup label="Major Class">
+							{MAJOR_CLASS_GROUPS.map((g) => (
+								<option key={g.prefix} value={g.prefix}>
+									{g.label} — {g.description}
+								</option>
+							))}
+						</optgroup>
+						<optgroup label="Historic District">
+							{Object.keys(DISTRICT_COLORS).map((name) => (
+								<option key={name} value={`district:${name}`}>
+									{name}
+								</option>
+							))}
+						</optgroup>
+					</select>
+				)}
 
 				{/* Individual class checkboxes */}
-				<div className="flex flex-col gap-1.5 overflow-y-auto">
-					{classInfos.map((c) => (
-						<div key={c.class} className="flex items-center gap-2">
-							<Checkbox
-								id={`class-${c.class}`}
-								checked={selectedClasses.has(c.class)}
-								onCheckedChange={() => toggleClass(c.class)}
-							/>
-							<Label
-								htmlFor={`class-${c.class}`}
-								className="text-xs cursor-pointer flex-1 flex items-center gap-1.5 min-w-0"
-							>
-								<div
-									className="w-2.5 h-2.5 rounded-full shrink-0"
-									style={{ backgroundColor: classColor(c.class) }}
+				{classesOpen && (
+					<div className="flex flex-col gap-1.5">
+						{classInfos.map((c) => (
+							<div key={c.class} className="flex items-center gap-2">
+								<Checkbox
+									id={`class-${c.class}`}
+									checked={selectedClasses.has(c.class)}
+									onCheckedChange={() => toggleClass(c.class)}
 								/>
-								<span className="font-mono shrink-0">{c.class}</span>
-								<span
-									className="text-muted-foreground truncate"
-									title={c.description}
+								<Label
+									htmlFor={`class-${c.class}`}
+									className="text-xs cursor-pointer flex-1 flex items-center gap-1.5 min-w-0"
 								>
-									{c.description}
-								</span>
-								<span className="font-mono tabular-nums text-right shrink-0 ml-auto">
-									{c.count.toLocaleString()}
-								</span>
-							</Label>
-						</div>
-					))}
-				</div>
+									<div
+										className="w-2.5 h-2.5 rounded-full shrink-0"
+										style={{ backgroundColor: classColor(c.class) }}
+									/>
+									<span className="font-mono shrink-0">{c.class}</span>
+									<span
+										className="text-muted-foreground truncate"
+										title={c.description}
+									>
+										{c.description}
+									</span>
+									<span className="font-mono tabular-nums text-right shrink-0 ml-auto">
+										{c.count.toLocaleString()}
+									</span>
+								</Label>
+							</div>
+						))}
+					</div>
+				)}
 
 				{/* CSV download */}
 				<button
@@ -596,20 +866,34 @@ export default function App() {
 						</svg>
 					)}
 				</button>
-				<DistrictTotals displayed={displayed} />
+				<div
+					className="absolute right-3 z-[1000] flex flex-col gap-2 max-sm:right-2"
+					style={{
+						bottom: 'max(2rem, calc(env(safe-area-inset-bottom, 0px) + 1rem))',
+					}}
+				>
+					<ZoneTotals displayed={displayed} />
+					<DistrictTotals displayed={displayed} />
+				</div>
 				<MapContainer
-					center={OAK_PARK_CENTER}
-					zoom={14}
+					center={initialCenter}
+					zoom={initialZoom}
 					preferCanvas
 					className="h-full w-full"
 				>
 					<TileLayer
-						attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
-						url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+						attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> &copy; <a href="https://carto.com/attributions">CARTO</a>'
+						url="https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png"
 					/>
-					<MapBounds properties={properties} />
+					<MapBounds properties={properties} skip={mapPos !== null} />
+					<MapPositionSync onMove={handleMapMove} />
 					{boundary && <BoundaryLayer boundary={boundary} />}
-					<PropertyMarkers properties={displayed} parcels={parcels} />
+					{zoning && <ZoningLayer zoning={zoning} enabled={enabledZones} />}
+					<PropertyMarkers
+						properties={displayed}
+						parcels={parcels}
+						showBoundaries={showBoundaries}
+					/>
 					{districts && (
 						<DistrictLayers districts={districts} enabled={enabledDistricts} />
 					)}

@@ -31,6 +31,9 @@ const ARCGIS_PARCELS_URL =
 const ARCGIS_HISTORIC_DISTRICTS_URL =
   'https://utility.arcgis.com/usrsvcs/servers/4cff1aaefa364b57b8c70d5c606f2088/rest/services/VOP/AGOL_VOP_Project/MapServer/13/query';
 
+const ARCGIS_ZONING_URL =
+  'https://utility.arcgis.com/usrsvcs/servers/4cff1aaefa364b57b8c70d5c606f2088/rest/services/VOP/AGOL_VOP_Project/MapServer/8/query';
+
 const ARCGIS_CENSUS_TRACTS_URL =
   'https://utility.arcgis.com/usrsvcs/servers/4cff1aaefa364b57b8c70d5c606f2088/rest/services/VOP/AGOL_VOP_Project/MapServer/159/query';
 
@@ -127,6 +130,25 @@ async function fetchHistoricDistricts() {
   return geojson;
 }
 
+async function fetchZoning() {
+  const params = new URLSearchParams({
+    where: '1=1',
+    outFields: 'ZONED,ZONINGDESCRIPTION,ZONINGCATEGORY',
+    f: 'geojson',
+    returnGeometry: 'true',
+    resultRecordCount: '2000',
+  });
+
+  console.log('Fetching zoning district polygons...');
+  const resp = await fetch(`${ARCGIS_ZONING_URL}?${params}`);
+  if (!resp.ok) throw new Error(`ArcGIS zoning fetch failed: ${resp.status}`);
+
+  const geojson = await resp.json();
+  const zones = [...new Set(geojson.features.map(f => f.properties.ZONED))].sort();
+  console.log(`  Found ${geojson.features.length} zoning polygons, ${zones.length} zones: ${zones.join(', ')}`);
+  return geojson;
+}
+
 async function fetchVillageBoundary() {
   const params = new URLSearchParams({
     where: '1=1',
@@ -156,6 +178,15 @@ function classifyDistrict(lon, lat, features) {
   const pt = point([lon, lat]);
   for (const f of features) {
     if (booleanPointInPolygon(pt, f)) return f.properties.NAME.trim();
+  }
+  return '';
+}
+
+function classifyZone(lon, lat, features) {
+  if (!lon || !lat) return '';
+  const pt = point([lon, lat]);
+  for (const f of features) {
+    if (booleanPointInPolygon(pt, f)) return f.properties.ZONED ?? '';
   }
   return '';
 }
@@ -239,8 +270,9 @@ async function main() {
   console.log('Building coordinate resolvers...');
   const resolveCoords = buildCoordResolvers(db);
 
-  // Fetch districts and village boundary
+  // Fetch districts, zoning, and village boundary
   const districtsGeojson = await fetchHistoricDistricts();
+  const zoningGeojson = await fetchZoning();
   const boundaryGeojson = await fetchVillageBoundary();
 
   // Process all properties
@@ -256,6 +288,8 @@ async function main() {
     const district = classifyDistrict(coords.lon, coords.lat, districtsGeojson.features);
     if (district) districtCounts[district] = (districtCounts[district] || 0) + 1;
 
+    const zone = classifyZone(coords.lon, coords.lat, zoningGeojson.features);
+
     // Only include properties with coordinates
     if (coords.lat && coords.lon) {
       properties.push({
@@ -266,6 +300,7 @@ async function main() {
         class: row.class,
         description: classDescs[row.class] || '',
         district: district || null,
+        zone: zone || null,
         url: `https://www.cookcountyassessor.com/pin/${row.pin}`,
       });
     }
@@ -331,6 +366,9 @@ async function main() {
   const parcelsPath = path.join(opts.outputDir, 'parcels.geojson');
   fs.writeFileSync(parcelsPath, JSON.stringify(parcelsGeojson));
 
+  const zoningPath = path.join(opts.outputDir, 'zoning.geojson');
+  fs.writeFileSync(zoningPath, JSON.stringify(zoningGeojson));
+
   // Summary
   console.log(`\nCoordinate resolution:`);
   console.log(`  Direct (address_points):  ${methodCounts.direct}`);
@@ -350,6 +388,7 @@ async function main() {
   console.log(`Wrote district boundaries to ${path.resolve(districtsPath)}`);
   console.log(`Wrote village boundary to ${path.resolve(boundaryPath)}`);
   console.log(`Wrote ${parcelsGeojson.features.length} parcel geometries to ${path.resolve(parcelsPath)}`);
+  console.log(`Wrote ${zoningGeojson.features.length} zoning polygons to ${path.resolve(zoningPath)}`);
 }
 
 main().catch(e => {
